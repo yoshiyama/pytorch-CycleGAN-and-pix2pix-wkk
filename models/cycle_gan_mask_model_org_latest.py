@@ -3,7 +3,6 @@ import itertools
 from util.image_pool import ImagePool
 from .base_model import BaseModel
 from . import networks
-import torch.nn.functional as F
 
 
 # class CycleGANModel(BaseModel):
@@ -115,69 +114,19 @@ class CycleGANMASKModel(BaseModel):
         self.mask_B = input['mask_B' if AtoB else 'mask_A'].to(self.device)
         self.image_paths = input['A_paths' if AtoB else 'B_paths']
 
-        # mask_A を 30x30(PatchGAN用） にリサイズ
-        self.mask_A_D = F.interpolate(self.mask_A, size=(30, 30), mode='bilinear', align_corners=True)
-
-        # mask_A を 256x256 にリサイズ
-        self.mask_A = F.interpolate(self.mask_A, size=(256, 256), mode='bilinear', align_corners=True)
-
-        # 2値化
-        threshold = 0.5
-        self.mask_A_D = (self.mask_A_D > threshold).float()
-        self.mask_A = (self.mask_A > threshold).float()
-        # 重みを適用
-        # self.mask_A = self.mask_A * self.opt.mask_weight
-
-        # mask_B を 30x30(PatchGAN用） にリサイズ
-        self.mask_B_D = F.interpolate(self.mask_B, size=(30, 30), mode='bilinear', align_corners=True)
-
-        # mask_B を 256x256 にリサイズ
-        self.mask_B = F.interpolate(self.mask_B, size=(256, 256), mode='bilinear', align_corners=True)
-        # 2値化
-        threshold = 0.5
-        self.mask_B_D = (self.mask_B_D > threshold).float()
-        self.mask_B = (self.mask_B > threshold).float()
-        # 重みを適用
-        # self.mask_B = self.mask_B * self.opt.mask_weight
-
         # Normalize masks by the mask_weight
         self.mask_A = self.mask_A * self.opt.mask_weight
         self.mask_B = self.mask_B * self.opt.mask_weight
-        # print("Mask pre_A statistics:")
-        # print("Min:", self.mask_A.min().item())
-        # print("Max:", self.mask_A.max().item())
-        # print("Mean:", self.mask_A.mean().item())
-        #
-        # print("Mask pre_B statistics:")
-        # print("Min:", self.mask_B.min().item())
-        # print("Max:", self.mask_B.max().item())
-        # print("Mean:", self.mask_B.mean().item())
-        self.mask_A[self.mask_A == 0] = 1
-        self.mask_B[self.mask_B == 0] = 1
-        self.mask_A_D = self.mask_A_D * self.opt.mask_weight
-        self.mask_B_D = self.mask_B_D * self.opt.mask_weight
-        self.mask_A_D[self.mask_A_D == 0] = 1
-        self.mask_B_D[self.mask_B_D == 0] = 1
-        #
-        # print("Mask A statistics:")
-        # print("Min:", self.mask_A.min().item())
-        # print("Max:", self.mask_A.max().item())
-        # print("Mean:", self.mask_A.mean().item())
-        #
-        # print("Mask B statistics:")
-        # print("Min:", self.mask_B.min().item())
-        # print("Max:", self.mask_B.max().item())
-        # print("Mean:", self.mask_B.mean().item())
-        #
-        # print("Mask A_D statistics:")
-        # print("Min:", self.mask_A_D.min().item())
-        # print("Max:", self.mask_A_D.max().item())
-        # print("Mean:", self.mask_A_D.mean().item())
-        #
-        # print("Mask B_D statistics:")
-        # print("Min:", self.mask_B_D.min().item())
-        # print("Max:", self.mask_B_D.max().item())
-        # print("Mean:", self.mask_B_D.mean().item())
+
+        print("Mask A statistics:")
+        print("Min:", self.mask_A.min().item())
+        print("Max:", self.mask_A.max().item())
+        print("Mean:", self.mask_A.mean().item())
+
+        print("Mask B statistics:")
+        print("Min:", self.mask_B.min().item())
+        print("Max:", self.mask_B.max().item())
+        print("Mean:", self.mask_B.mean().item())
 
     def forward(self):
         """Run forward pass; called by both functions <optimize_parameters> and <test>."""
@@ -186,8 +135,7 @@ class CycleGANMASKModel(BaseModel):
         self.fake_A = self.netG_B(self.real_B)  # G_B(B)
         self.rec_B = self.netG_A(self.fake_A)   # G_A(G_B(B))
 
-    # def backward_D_basic(self, netD, real, fake):#D:生成器，real：真实图片，fake：生成图片
-    def backward_D_basic(self, netD, real, fake, mask):  # D:生成器，real：真实图片，fake：生成图片
+    def backward_D_basic(self, netD, real, fake):
         """Calculate GAN loss for the discriminator
 
         Parameters:
@@ -200,83 +148,65 @@ class CycleGANMASKModel(BaseModel):
         """
         # Real
         pred_real = netD(real)
-        # loss_D_real = self.criterionGAN(pred_real*mask, True)
-        loss_D_real = self.criterionGAN((pred_real-1) * mask, False)
-
+        loss_D_real = self.criterionGAN(pred_real, True)
         # Fake
         pred_fake = netD(fake.detach())
-        loss_D_fake = self.criterionGAN(pred_fake*mask, False)
+        loss_D_fake = self.criterionGAN(pred_fake, False)
         # Combined loss and calculate gradients
         loss_D = (loss_D_real + loss_D_fake) * 0.5
-        # print("loss_D:", loss_D)
-        # print("loss_D_real:", loss_D_real)
-        # print("loss_D_fake:", loss_D_fake)
         loss_D.backward()
         return loss_D
 
     def backward_D_A(self):
         """Calculate GAN loss for discriminator D_A"""
         fake_B = self.fake_B_pool.query(self.fake_B)
-        self.loss_D_A = self.backward_D_basic(self.netD_A, self.real_B, fake_B, self.mask_A_D)
+        self.loss_D_A = self.backward_D_basic(self.netD_A, self.real_B, fake_B)
 
     def backward_D_B(self):
         """Calculate GAN loss for discriminator D_B"""
         fake_A = self.fake_A_pool.query(self.fake_A)
-        self.loss_D_B = self.backward_D_basic(self.netD_B, self.real_A, fake_A, self.mask_B_D)
+        self.loss_D_B = self.backward_D_basic(self.netD_B, self.real_A, fake_A)
 
-    def backward_G(self):# 生成
+    def backward_G(self):
         """Calculate the loss for generators G_A and G_B"""
         lambda_idt = self.opt.lambda_identity
         lambda_A = self.opt.lambda_A
         lambda_B = self.opt.lambda_B
         # Identity loss
         if lambda_idt > 0:
-
             # G_A should be identity if real_B is fed: ||G_A(B) - B||
             self.idt_A = self.netG_A(self.real_B)
-            # print("Size of idt_A:", self.idt_A.shape)
-            # print("Size of real_B:", self.real_B.shape)
-            # print("Size of mask_B:", self.mask_B.shape)
-            self.loss_idt_A = self.criterionIdt(self.idt_A*self.mask_B, self.real_B*self.mask_B) * lambda_B * lambda_idt
-            # self.loss_idt_A = (self.criterionIdt(self.idt_A, self.real_B) * self.mask_B).mean() * lambda_B * lambda_idt
+            self.loss_idt_A = (self.criterionIdt(self.idt_A, self.real_B) * self.mask_B).mean() * lambda_B * lambda_idt
             # self.loss_idt_A = (self.criterionIdt(self.idt_A*self.mask_B, self.real_B) ).mean() * lambda_B * lambda_idt
             # G_B should be identity if real_A is fed: ||G_B(A) - A||
             self.idt_B = self.netG_B(self.real_A)
-            # self.loss_idt_B = (self.criterionIdt(self.idt_B, self.real_A) * self.mask_A).mean() * lambda_A * lambda_idt
-            # self.loss_idt_B = (self.criterionIdt(self.idt_B, self.real_A) * self.mask_A).mean() * lambda_A * lambda_idt
-            self.loss_idt_B = (self.criterionIdt(self.idt_B* self.mask_A, self.real_A* self.mask_A)) * lambda_A * lambda_idt
+            self.loss_idt_B = (self.criterionIdt(self.idt_B, self.real_A) * self.mask_A).mean() * lambda_A * lambda_idt
         else:
             self.loss_idt_A = 0
             self.loss_idt_B = 0
 
         # GAN loss D_A(G_A(A))
         self.fake_B = self.netG_A(self.real_A)
-        # self.loss_G_A = (self.criterionGAN(self.netD_A(self.fake_B), True) * self.mask_A).mean()
-        self.loss_G_A = self.criterionGAN((self.netD_A(self.fake_B)-1)*self.mask_A_D, False)
-        # loss_D_real = self.criterionGAN((pred_real - 1) * mask, False)
-        # self.loss_G_A = (self.criterionGAN(self.netD_A(self.fake_B), True) * self.mask_A).mean()
+        self.loss_G_A = (self.criterionGAN(self.netD_A(self.fake_B), True) * self.mask_A).mean()
         # print("OIIII=",self.netD_A(self.fake_B).shape)
         # print("oi2=",self.mask_A.shape)
 
-        # print("Size of mask_A:", self.mask_A.shape)
-        # print("Size of Discriminator output:", self.netD_A(self.fake_B).shape)
-        # print("Size of GAN loss:", self.criterionGAN(self.netD_A(self.fake_B), True).shape)
-        # print("Size of loss_G_A:", (self.criterionGAN(self.netD_A(self.fake_B), True) * self.mask_A).shape)
+        print("Size of mask_A:", self.mask_A.shape)
+        print("Size of Discriminator output:", self.netD_A(self.fake_B).shape)
+        print("Size of GAN loss:", self.criterionGAN(self.netD_A(self.fake_B), True).shape)
+        print("Size of loss_G_A:", (self.criterionGAN(self.netD_A(self.fake_B), True) * self.mask_A).shape)
 
         # GAN loss D_B(G_B(B))
         self.fake_A = self.netG_B(self.real_B)
-        # self.loss_G_B = (self.criterionGAN(self.netD_B(self.fake_A), True) * self.mask_B).mean()
-        self.loss_G_B = self.criterionGAN((self.netD_B(self.fake_A)-1)*self.mask_B_D, False)
+        self.loss_G_B = (self.criterionGAN(self.netD_B(self.fake_A), True) * self.mask_B).mean()
 
         # Forward cycle loss || G_B(G_A(A)) - A||
         self.rec_A = self.netG_B(self.fake_B)
-        self.loss_cycle_A = (self.criterionCycle(self.rec_A* self.mask_A, self.real_A* self.mask_A) ) * lambda_A
-        # self.loss_cycle_A = (self.criterionCycle(self.rec_A, self.real_A) * self.mask_A).mean() * lambda_A
+        self.loss_cycle_A = (self.criterionCycle(self.rec_A, self.real_A) * self.mask_A).mean() * lambda_A
 
         # Backward cycle loss || G_A(G_B(B)) - B||
         self.rec_B = self.netG_A(self.fake_A)
-        self.loss_cycle_B = (self.criterionCycle(self.rec_B* self.mask_B, self.real_B* self.mask_B))* lambda_B
-        # self.loss_cycle_B = (self.criterionCycle(self.rec_B, self.real_B) * self.mask_B).mean() * lambda_B
+        self.loss_cycle_B = (self.criterionCycle(self.rec_B, self.real_B) * self.mask_B).mean() * lambda_B
 
         # combined loss and calculate gradients
         self.loss_G = self.loss_G_A + self.loss_G_B + self.loss_cycle_A + self.loss_cycle_B + self.loss_idt_A + self.loss_idt_B

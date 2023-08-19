@@ -7,7 +7,8 @@ from torchvision import transforms
 
 
 
-class UnalignedDataset(BaseDataset):
+# class UnalignedDataset(BaseDataset):
+class UnalignedMaskDataset(BaseDataset):
     """
     This dataset class can load unaligned/unpaired datasets.
 
